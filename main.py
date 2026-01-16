@@ -14,46 +14,24 @@ HEADERS = {
 
 @app.get("/lookup")
 async def lookup(cli: str = Query(..., description="Phone number")):
-    async with httpx.AsyncClient(http2=True, timeout=15.0) as client:
-        # Request 1: Name Fetch
-        name_task = client.get(
-            "https://api.eyecon-app.com/app/getnames.jsp",
-            params={
-                "cli": cli, "lang": "en", "is_callerid": "true", 
-                "cv": "vc_729_vn_4.2026.01.13.0939_a", "source": "HISTORY"
-            },
-            headers=HEADERS
-        )
+    try:
+        async with httpx.AsyncClient(http2=True, timeout=10.0) as client:
+            # Parallel Tasks
+            n_task = client.get("https://api.eyecon-app.com/app/getnames.jsp", 
+                                params={"cli": cli, "lang": "en", "is_callerid": "true", "cv": "vc_729_vn_4.2026.01.13.0939_a", "source": "HISTORY"}, 
+                                headers=HEADERS)
+            
+            p_task = client.get("https://api.eyecon-app.com/app/pic", 
+                                params={"cli": cli, "is_callerid": "true", "size": "big", "type": "0", "cv": "vc_729_vn_4.2026.01.13.0939_a"}, 
+                                headers=HEADERS, follow_redirects=False)
 
-        # Request 2: High Quality Picture Fetch (size=big)
-        pic_task = client.get(
-            "https://api.eyecon-app.com/app/pic",
-            params={
-                "cli": cli, 
-                "is_callerid": "true", 
-                "size": "big", # Yahan 'big' karne se quality clear aayegi
-                "type": "0", 
-                "cv": "vc_729_vn_4.2026.01.13.0939_a"
-            },
-            headers=HEADERS,
-            follow_redirects=False
-        )
+            n_res, p_res = await asyncio.gather(n_task, p_task)
 
-        responses = await asyncio.gather(name_task, pic_task, return_exceptions=True)
-        name_res, pic_res = responses
+            # Crash-proof parsing
+            name = n_res.text.strip() if n_res.status_code == 200 else "Not Found"
+            photo = p_res.headers.get("Location", "No Photo") if p_res.status_code == 302 else "No Photo"
 
-        # Processing Results
-        name_final = name_res.text.strip() if hasattr(name_res, 'status_code') and name_res.status_code == 200 else "Not Found"
-        
-        # 302 Redirect se Direct Link nikalna
-        photo_final = "No Photo"
-        if hasattr(pic_res, 'status_code') and pic_res.status_code == 302:
-            photo_final = pic_res.headers.get("Location")
-
-        return {
-            "status": "success",
-            "number": cli,
-            "name": name_final,
-            "photo_url": photo_final
-        }
-        
+            return {"status": "success", "name": name, "photo": photo}
+            
+    except Exception as e:
+        return {"status": "error", "message": str(e)} # Ye line error bata degi ki kya dikkat hai
