@@ -1,12 +1,11 @@
 import httpx
 import asyncio
-from fastapi import FastAPI, Header, HTTPException, Query
-from typing import Optional
+from fastapi import FastAPI, HTTPException, Query
 
-app = FastAPI(title="Eyecon API Wrapper")
+app = FastAPI()
 
-# Configuration
-VALID_API_KEY = "@CSINT"
+# Constant Config
+VALID_KEY = "@CSINT"
 BASE_HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36",
     "E-Auth-V": "e1",
@@ -15,51 +14,43 @@ BASE_HEADERS = {
     "E-Auth-K": "PgdtSBeR0MumR7fO",
 }
 
-async def fetch_data(client, url, params, headers):
-    try:
-        response = await client.get(url, params=params, headers=headers, timeout=10.0)
-        return response
-    except Exception as e:
-        return None
-
 @app.get("/lookup")
-async def lookup(cli: str = Query(..., description="Phone number to lookup"), 
-                 api_key: str = Header(..., alias="X-API-KEY")):
-    
-    # Auth Check
-    if api_key != VALID_API_KEY:
-        raise HTTPException(status_code=403, detail="Invalid API Key")
+async def lookup(
+    cli: str = Query(..., description="Phone number"),
+    key: str = Query(..., description="API Key") # Ab key URL parameter mein hai
+):
+    # API Key Validation
+    if key != VALID_KEY:
+        raise HTTPException(status_code=403, detail="Galti mat kar bhai, sahi key daal!")
 
-    async with httpx.AsyncClient(http2=True, follow_redirects=False) as client:
-        # Names and Pic requests in parallel for speed
-        names_params = {
+    async with httpx.AsyncClient(http2=True, follow_redirects=False, timeout=10.0) as client:
+        # Dono request parallel mein chalengi fast processing ke liye
+        name_url = "https://api.eyecon-app.com/app/getnames.jsp"
+        pic_url = "https://api.eyecon-app.com/app/pic"
+
+        params_name = {
             "cli": cli, "lang": "en", "is_callerid": "true", "is_ic": "true",
             "cv": "vc_729_vn_4.2026.01.13.0939_a", "requestApi": "URLconnection", "source": "HISTORY"
         }
         
-        pic_params = {
+        params_pic = {
             "cli": cli, "is_callerid": "true", "size": "small", "type": "0",
             "src": "HISTORY", "cancelfresh": "0", "cv": "vc_729_vn_4.2026.01.13.0939_a"
         }
 
-        # Executing concurrently
-        name_task = fetch_data(client, "https://api.eyecon-app.com/app/getnames.jsp", names_params, BASE_HEADERS)
-        pic_task = fetch_data(client, "https://api.eyecon-app.com/app/pic", pic_params, BASE_HEADERS)
+        # Parallel Execution (Async)
+        name_task = client.get(name_url, params=params_name, headers=BASE_HEADERS)
+        pic_task = client.get(pic_url, params=params_pic, headers=BASE_HEADERS)
         
         name_res, pic_res = await asyncio.gather(name_task, pic_task)
 
-        # Process Results
-        result = {"phone": cli, "names": [], "photo_url": None}
+        # Result Parsing
+        final_data = {
+            "status": "success",
+            "phone": cli,
+            "name": name_res.json() if name_res.status_code == 200 else "Not Found",
+            "photo": pic_res.headers.get("Location") if pic_res.status_code == 302 else "No Photo"
+        }
 
-        if name_res and name_res.status_code == 200:
-            result["names"] = name_res.json() if "application/json" in name_res.headers.get("content-type", "") else name_res.text
-            
-        if pic_res and pic_res.status_code == 302:
-            result["photo_url"] = pic_res.headers.get("Location")
-
-        return result
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-    
+        return final_data
+        
