@@ -26,50 +26,50 @@ def home():
     return {"status": "CSINT API running"}
 
 
-@app.get("/getnames")
-async def get_names(cli: str, x_api_key: str = Header(...)):
+@app.get("/lookup")
+async def lookup(cli: str, x_api_key: str = Header(...)):
     verify_key(x_api_key)
-
-    params = {
-        "cli": cli,
-        "lang": "en",
-        "is_callerid": "true",
-        "is_ic": "true",
-        "source": "HISTORY"
-    }
-
-    async with httpx.AsyncClient(http2=True) as client:
-        r = await client.get(
-            "https://api.eyecon-app.com/app/getnames.jsp",
-            headers=BASE_HEADERS,
-            params=params
-        )
-
-    return {
-        "status": r.status_code,
-        "response": r.text
-    }
-
-
-@app.get("/getpic")
-async def get_pic(cli: str, x_api_key: str = Header(...)):
-    verify_key(x_api_key)
-
-    params = {
-        "cli": cli,
-        "size": "small",
-        "type": "0",
-        "src": "HISTORY"
-    }
 
     async with httpx.AsyncClient(http2=True, follow_redirects=False) as client:
-        r = await client.get(
+
+        # 🔹 1️⃣ Try getting picture first
+        pic_params = {
+            "cli": cli,
+            "size": "small",
+            "type": "0",
+            "src": "HISTORY"
+        }
+
+        pic_resp = await client.get(
             "https://api.eyecon-app.com/app/pic",
             headers=BASE_HEADERS,
-            params=params
+            params=pic_params
         )
 
-    return {
-        "status": r.status_code,
-        "image_url": r.headers.get("Location")
-    }
+        if pic_resp.status_code == 302 and "Location" in pic_resp.headers:
+            return {
+                "cli": cli,
+                "type": "picture",
+                "image_url": pic_resp.headers["Location"]
+            }
+
+        # 🔹 2️⃣ If pic not found → get name
+        name_params = {
+            "cli": cli,
+            "lang": "en",
+            "is_callerid": "true",
+            "is_ic": "true",
+            "source": "HISTORY"
+        }
+
+        name_resp = await client.get(
+            "https://api.eyecon-app.com/app/getnames.jsp",
+            headers=BASE_HEADERS,
+            params=name_params
+        )
+
+        return {
+            "cli": cli,
+            "type": "name",
+            "response": name_resp.text
+        }
