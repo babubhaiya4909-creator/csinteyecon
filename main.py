@@ -4,7 +4,6 @@ from fastapi import FastAPI, Query
 
 app = FastAPI()
 
-# Headers constant rakhe hain taaki block na ho
 HEADERS = {
     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36",
     "E-Auth-V": "e1",
@@ -15,41 +14,46 @@ HEADERS = {
 
 @app.get("/lookup")
 async def lookup(cli: str = Query(..., description="Phone number")):
-    async with httpx.AsyncClient(http2=True, follow_redirects=False, timeout=10.0) as client:
-        # Dono request ek saath (Parallel) start hongi
+    async with httpx.AsyncClient(http2=True, timeout=15.0) as client:
+        # Request 1: Name Fetch
         name_task = client.get(
-            "https://api.eyecon-app.com/app/getnames.jsp", 
-            params={"cli": cli, "lang": "en", "is_callerid": "true", "is_ic": "true", "cv": "vc_729_vn_4.2026.01.13.0939_a", "requestApi": "URLconnection", "source": "HISTORY"},
+            "https://api.eyecon-app.com/app/getnames.jsp",
+            params={
+                "cli": cli, "lang": "en", "is_callerid": "true", 
+                "cv": "vc_729_vn_4.2026.01.13.0939_a", "source": "HISTORY"
+            },
             headers=HEADERS
         )
-        
+
+        # Request 2: High Quality Picture Fetch (size=big)
         pic_task = client.get(
             "https://api.eyecon-app.com/app/pic",
-            params={"cli": cli, "is_callerid": "true", "size": "small", "type": "0", "src": "HISTORY", "cancelfresh": "0", "cv": "vc_729_vn_4.2026.01.13.0939_a"},
-            headers=HEADERS
+            params={
+                "cli": cli, 
+                "is_callerid": "true", 
+                "size": "big", # Yahan 'big' karne se quality clear aayegi
+                "type": "0", 
+                "cv": "vc_729_vn_4.2026.01.13.0939_a"
+            },
+            headers=HEADERS,
+            follow_redirects=False
         )
 
-        # Yahan fast processing ho rahi hai (Parallel execution)
-        name_res, pic_res = await asyncio.gather(name_task, pic_task)
+        responses = await asyncio.gather(name_task, pic_task, return_exceptions=True)
+        name_res, pic_res = responses
 
-        # Response parsing
-        name_data = "Not Found"
-        if name_res.status_code == 200:
-            try:
-                name_data = name_res.json()
-            except:
-                name_data = name_res.text
-
-        photo_url = pic_res.headers.get("Location", "No Photo") if pic_res.status_code == 302 else "No Photo"
+        # Processing Results
+        name_final = name_res.text.strip() if hasattr(name_res, 'status_code') and name_res.status_code == 200 else "Not Found"
+        
+        # 302 Redirect se Direct Link nikalna
+        photo_final = "No Photo"
+        if hasattr(pic_res, 'status_code') and pic_res.status_code == 302:
+            photo_final = pic_res.headers.get("Location")
 
         return {
             "status": "success",
-            "phone": cli,
-            "name": name_data,
-            "photo": photo_url
+            "number": cli,
+            "name": name_final,
+            "photo_url": photo_final
         }
-
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
-    
+        
