@@ -7,7 +7,7 @@ app = FastAPI(title="CSINT Eyecon API")
 API_KEY = "@CSINT"
 
 BASE_HEADERS = {
-    "User-Agent": "Mozilla/5.0",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
     "Accept": "application/json",
     "E-Auth-V": "e1",
     "E-Auth": "dd2bc3e8-0f11-40c2-9bc2-81bcd862baf5",
@@ -16,13 +16,19 @@ BASE_HEADERS = {
     "Accept-Encoding": "gzip, deflate, br"
 }
 
-def check_key(key: str):
+def verify_key(key: str):
     if key != API_KEY:
         raise HTTPException(status_code=401, detail="Invalid API Key")
 
+
+@app.get("/")
+def home():
+    return {"status": "CSINT API running"}
+
+
 @app.get("/getnames")
 async def get_names(cli: str, x_api_key: str = Header(...)):
-    check_key(x_api_key)
+    verify_key(x_api_key)
 
     params = {
         "cli": cli,
@@ -41,13 +47,13 @@ async def get_names(cli: str, x_api_key: str = Header(...)):
 
     return {
         "status": r.status_code,
-        "data": r.text
+        "response": r.text
     }
 
 
 @app.get("/getpic")
 async def get_pic(cli: str, x_api_key: str = Header(...)):
-    check_key(x_api_key)
+    verify_key(x_api_key)
 
     params = {
         "cli": cli,
