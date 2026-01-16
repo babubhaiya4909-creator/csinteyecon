@@ -1,9 +1,9 @@
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, HTTPException
 import httpx
 
 app = FastAPI(title="CSINT Eyecon API")
 
-# 🔑 HARD-CODED API KEY
+# 🔑 API KEY (URL PARAM)
 API_KEY = "@CSINT"
 
 BASE_HEADERS = {
@@ -27,12 +27,13 @@ def home():
 
 
 @app.get("/lookup")
-async def lookup(cli: str, x_api_key: str = Header(...)):
-    verify_key(x_api_key)
+async def lookup(cli: str, key: str):
+    # 🔐 URL PARAM KEY CHECK
+    verify_key(key)
 
     async with httpx.AsyncClient(http2=True, follow_redirects=False) as client:
 
-        # 🔹 1️⃣ Try getting picture first
+        # 1️⃣ Try picture first
         pic_params = {
             "cli": cli,
             "size": "small",
@@ -53,7 +54,7 @@ async def lookup(cli: str, x_api_key: str = Header(...)):
                 "image_url": pic_resp.headers["Location"]
             }
 
-        # 🔹 2️⃣ If pic not found → get name
+        # 2️⃣ Picture nahi mili → name
         name_params = {
             "cli": cli,
             "lang": "en",
