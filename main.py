@@ -1,76 +1,65 @@
-from fastapi import FastAPI, HTTPException
 import httpx
+import asyncio
+from fastapi import FastAPI, Header, HTTPException, Query
+from typing import Optional
 
-app = FastAPI(title="CSINT Eyecon API")
+app = FastAPI(title="Eyecon API Wrapper")
 
-# 🔑 API KEY (URL PARAM)
-API_KEY = "@CSINT"
-
+# Configuration
+VALID_API_KEY = "@CSINT"
 BASE_HEADERS = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
-    "Accept": "application/json",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.88 Safari/537.36",
     "E-Auth-V": "e1",
     "E-Auth": "dd2bc3e8-0f11-40c2-9bc2-81bcd862baf5",
     "E-Auth-C": "34",
     "E-Auth-K": "PgdtSBeR0MumR7fO",
-    "Accept-Encoding": "gzip, deflate, br"
 }
 
-def verify_key(key: str):
-    if key != API_KEY:
-        raise HTTPException(status_code=401, detail="Invalid API Key")
-
-
-@app.get("/")
-def home():
-    return {"status": "CSINT API running"}
-
+async def fetch_data(client, url, params, headers):
+    try:
+        response = await client.get(url, params=params, headers=headers, timeout=10.0)
+        return response
+    except Exception as e:
+        return None
 
 @app.get("/lookup")
-async def lookup(cli: str, key: str):
-    # 🔐 URL PARAM KEY CHECK
-    verify_key(key)
+async def lookup(cli: str = Query(..., description="Phone number to lookup"), 
+                 api_key: str = Header(..., alias="X-API-KEY")):
+    
+    # Auth Check
+    if api_key != VALID_API_KEY:
+        raise HTTPException(status_code=403, detail="Invalid API Key")
 
     async with httpx.AsyncClient(http2=True, follow_redirects=False) as client:
-
-        # 1️⃣ Try picture first
+        # Names and Pic requests in parallel for speed
+        names_params = {
+            "cli": cli, "lang": "en", "is_callerid": "true", "is_ic": "true",
+            "cv": "vc_729_vn_4.2026.01.13.0939_a", "requestApi": "URLconnection", "source": "HISTORY"
+        }
+        
         pic_params = {
-            "cli": cli,
-            "size": "small",
-            "type": "0",
-            "src": "HISTORY"
+            "cli": cli, "is_callerid": "true", "size": "small", "type": "0",
+            "src": "HISTORY", "cancelfresh": "0", "cv": "vc_729_vn_4.2026.01.13.0939_a"
         }
 
-        pic_resp = await client.get(
-            "https://api.eyecon-app.com/app/pic",
-            headers=BASE_HEADERS,
-            params=pic_params
-        )
+        # Executing concurrently
+        name_task = fetch_data(client, "https://api.eyecon-app.com/app/getnames.jsp", names_params, BASE_HEADERS)
+        pic_task = fetch_data(client, "https://api.eyecon-app.com/app/pic", pic_params, BASE_HEADERS)
+        
+        name_res, pic_res = await asyncio.gather(name_task, pic_task)
 
-        if pic_resp.status_code == 302 and "Location" in pic_resp.headers:
-            return {
-                "cli": cli,
-                "type": "picture",
-                "image_url": pic_resp.headers["Location"]
-            }
+        # Process Results
+        result = {"phone": cli, "names": [], "photo_url": None}
 
-        # 2️⃣ Picture nahi mili → name
-        name_params = {
-            "cli": cli,
-            "lang": "en",
-            "is_callerid": "true",
-            "is_ic": "true",
-            "source": "HISTORY"
-        }
+        if name_res and name_res.status_code == 200:
+            result["names"] = name_res.json() if "application/json" in name_res.headers.get("content-type", "") else name_res.text
+            
+        if pic_res and pic_res.status_code == 302:
+            result["photo_url"] = pic_res.headers.get("Location")
 
-        name_resp = await client.get(
-            "https://api.eyecon-app.com/app/getnames.jsp",
-            headers=BASE_HEADERS,
-            params=name_params
-        )
+        return result
 
-        return {
-            "cli": cli,
-            "type": "name",
-            "response": name_resp.text
-        }
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=8000)
+    
