@@ -18,16 +18,17 @@ def extract_details(url):
     account = "Unknown"
     uid = "Not Found"
     
-    if "facebook.com" in url:
+    # Facebook Graph/Profile logic
+    if "facebook.com" in url or "fbcdn.net" in url:
         account = "facebook.com"
-        # URL se ID nikalne ke liye Regex
-        match = re.search(r'facebook\.com/(\d+)/', url)
+        # Multiple regex patterns for FB IDs
+        match = re.search(r'facebook\.com/(\d+)/|/(\d+)_|profile\.php\?id=(\d+)', url)
         if match:
-            uid = match.group(1)
+            # Jo bhi group match kare, wo ID hai
+            uid = next(g for g in match.groups() if g is not None)
             
     elif "whatsapp.net" in url:
         account = "whatsapp.net"
-        # WhatsApp ID aksar URL ke path mein hoti hai
         match = re.search(r'/([\d-]+)@', url)
         if match:
             uid = match.group(1)
@@ -51,16 +52,28 @@ async def lookup(cli: str = Query(..., description="Phone number")):
             name = n_res.text.strip() if n_res.status_code == 200 else "Not Found"
             photo = p_res.headers.get("Location", "No Photo")
             
-            # Details extract karein
             acc_type, account_id = extract_details(photo)
 
-            return {
+            # Response base structure
+            response_data = {
                 "status": "success",
                 "name": name,
                 "photo": photo,
                 "Account": acc_type,
                 "Id": account_id
             }
+
+            # 🔥 Facebook ID Found Block
+            if acc_type == "facebook.com" and account_id != "Not Found":
+                response_data["facebook_info"] = {
+                    "found": True,
+                    "profile_url": f"https://www.facebook.com/profile.php?id={account_id}",
+                    "direct_link": f"fb://profile/{account_id}" # Mobile app direct link
+                }
+            else:
+                response_data["facebook_info"] = {"found": False}
+
+            return response_data
             
     except Exception as e:
         return {"status": "error", "message": str(e)}
